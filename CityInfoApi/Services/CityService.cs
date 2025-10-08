@@ -23,7 +23,7 @@ namespace CityInfoApi.Services
         // -----------------------------
         public async Task<Result<City>> AddCityAsync(AddCityRequest request)
         {
-            AppLogger.LogActionStart(_logger, "AddCity", request);
+            AppLogger.LogActionStart(_logger, ApiActions.AddCity, request);
 
             var addedCity = await _repo.AddAsync(request);
             if (addedCity == null)
@@ -32,7 +32,7 @@ namespace CityInfoApi.Services
                 return Result<City>.Conflict(ApiMessages.DuplicateCity);
             }
 
-            AppLogger.LogActionSuccess(_logger, "AddCity", new { addedCity.Id, addedCity.Name });
+            AppLogger.LogActionSuccess(_logger, ApiActions.AddCity, new { addedCity.Id, addedCity.Name });
             return Result<City>.Created(addedCity, ApiMessages.CityCreated);
         }
 
@@ -45,7 +45,7 @@ namespace CityInfoApi.Services
             DateTime dateEstablished,
             long estimatedPopulation)
         {
-            AppLogger.LogActionStart(_logger, "UpdateCity", new { id });
+            AppLogger.LogActionStart(_logger, ApiActions.UpdateCity, new { id });
 
             var city = await _repo.GetByIdAsync(id);
             if (city == null)
@@ -59,7 +59,7 @@ namespace CityInfoApi.Services
             city.EstimatedPopulation = estimatedPopulation;
 
             await _repo.UpdateAsync(city);
-            AppLogger.LogActionSuccess(_logger, "UpdateCity", new { id });
+            AppLogger.LogActionSuccess(_logger, ApiActions.UpdateCity, new { id });
 
             return Result<City>.NoContent(ApiMessages.CityUpdated);
         }
@@ -69,7 +69,7 @@ namespace CityInfoApi.Services
         // -----------------------------
         public async Task<Result<City>> DeleteCityAsync(int id)
         {
-            AppLogger.LogActionStart(_logger, "DeleteCity", new { id });
+            AppLogger.LogActionStart(_logger, ApiActions.DeleteCity, new { id });
 
             var city = await _repo.GetByIdAsync(id);
             if (city == null)
@@ -79,7 +79,7 @@ namespace CityInfoApi.Services
             }
 
             await _repo.DeleteAsync(id);
-            AppLogger.LogActionSuccess(_logger, "DeleteCity", new { id });
+            AppLogger.LogActionSuccess(_logger, ApiActions.DeleteCity, new { id });
 
             return Result<City>.NoContent(ApiMessages.CityDeleted);
         }
@@ -89,7 +89,7 @@ namespace CityInfoApi.Services
         // -----------------------------
         public async Task<Result<IEnumerable<CitySearchResultDto>>> SearchCityByNameAsync(string name)
         {
-            AppLogger.LogActionStart(_logger, "SearchCity", new { name });
+            AppLogger.LogActionStart(_logger, ApiActions.SearchCity, new { name });
 
             var cities = (await _repo.SearchByNameAsync(name)).ToList();
             if (!cities.Any())
@@ -148,7 +148,7 @@ namespace CityInfoApi.Services
                 results.Add(dto);
             }
 
-            AppLogger.LogActionSuccess(_logger, "SearchCity", new { Count = results.Count });
+            AppLogger.LogActionSuccess(_logger, ApiActions.SearchCity, new { Count = results.Count });
             return Result<IEnumerable<CitySearchResultDto>>.Ok(results);
         }
 
