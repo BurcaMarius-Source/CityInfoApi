@@ -11,4 +11,6 @@
         public DateTime DateEstablished { get; set; }
         public int EstimatedPopulation { get; set; }
     }
+    internal record WeatherInfo(string Main, string Description, double Temperature);
+    internal record CountryInfo(string? Alpha2, string? Alpha3, string? CurrencyCode);
 }

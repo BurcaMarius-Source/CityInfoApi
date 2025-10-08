@@ -155,8 +155,7 @@ namespace CityInfoApi.Services
         // -----------------------------
         // PRIVATE HELPERS
         // -----------------------------
-        private record CountryInfo(string? Alpha2, string? Alpha3, string? CurrencyCode);
-
+  
         private async Task<CountryInfo?> GetCountryInfoAsync(string countryName)
         {
             if (string.IsNullOrWhiteSpace(countryName)) return null;
@@ -204,8 +203,6 @@ namespace CityInfoApi.Services
                 return p.GetString();
             return null;
         }
-
-        private record WeatherInfo(string Main, string Description, double Temperature);
 
         private async Task<WeatherInfo?> GetWeatherAsync(string cityName)
         {
