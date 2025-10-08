@@ -1,4 +1,5 @@
-﻿using CityInfoApi.DTOs;
+﻿using CityInfoApi.Common;
+using CityInfoApi.DTOs;
 using CityInfoApi.Models;
 using CityInfoApi.Repositories;
 using System.Net;
@@ -6,61 +7,96 @@ using System.Text.Json;
 
 namespace CityInfoApi.Services
 {
-    public class CityService : ICityService
+    public class CityService(
+        ICityRepository repo,
+        IHttpClientFactory httpFactory,
+        IConfiguration config,
+        ILogger<CityService> logger) : ICityService
     {
-        private readonly ICityRepository _repo;
-        private readonly IHttpClientFactory _httpFactory;
-        private readonly IConfiguration _config;
-        private readonly ILogger<CityService> _logger;
+        private readonly ICityRepository _repo = repo;
+        private readonly IHttpClientFactory _httpFactory = httpFactory;
+        private readonly IConfiguration _config = config;
+        private readonly ILogger<CityService> _logger = logger;
 
-        public CityService(ICityRepository repo, IHttpClientFactory httpFactory, IConfiguration config, ILogger<CityService> logger)
+        // -----------------------------
+        // ADD CITY
+        // -----------------------------
+        public async Task<Result<City>> AddCityAsync(AddCityRequest request)
         {
-            _repo = repo;
-            _httpFactory = httpFactory;
-            _config = config;
-            _logger = logger;
-        }
+            AppLogger.LogActionStart(_logger, "AddCity", request);
 
-        public async Task<City?> AddCityAsync(AddCityRequest request) {
-            var result = await _repo.AddAsync(request);
-
-            if (result == null)
+            var addedCity = await _repo.AddAsync(request);
+            if (addedCity == null)
             {
-                _logger.LogWarning("Duplicate city detected: {CityName}, {Country}", request.Name, request.Country);
+                AppLogger.LogWarning(_logger, ApiMessages.DuplicateCity, new { request.Name, request.Country });
+                return Result<City>.Conflict(ApiMessages.DuplicateCity);
             }
 
-            return result;
-        } 
-
-        public async Task<bool> UpdateCityAsync(int id, int touristRating, DateTime dateEstablished, long estimatedPopulation)
-        {
-            var existing = await _repo.GetByIdAsync(id);
-            if (existing == null) return false;
-            existing.TouristRating = touristRating;
-            existing.DateEstablished = dateEstablished;
-            existing.EstimatedPopulation = estimatedPopulation;
-            await _repo.UpdateAsync(existing);
-            return true;
+            AppLogger.LogActionSuccess(_logger, "AddCity", new { addedCity.Id, addedCity.Name });
+            return Result<City>.Created(addedCity, ApiMessages.CityCreated);
         }
 
-        public Task<bool> DeleteCityAsync(int id)
+        // -----------------------------
+        // UPDATE CITY
+        // -----------------------------
+        public async Task<Result<City>> UpdateCityAsync(
+            int id,
+            int touristRating,
+            DateTime dateEstablished,
+            long estimatedPopulation)
         {
-            return DeleteInternalAsync(id);
+            AppLogger.LogActionStart(_logger, "UpdateCity", new { id });
+
+            var city = await _repo.GetByIdAsync(id);
+            if (city == null)
+            {
+                AppLogger.LogWarning(_logger, ApiMessages.CityNotFound, new { id });
+                return Result<City>.NotFound(ApiMessages.CityNotFound);
+            }
+
+            city.TouristRating = touristRating;
+            city.DateEstablished = dateEstablished;
+            city.EstimatedPopulation = estimatedPopulation;
+
+            await _repo.UpdateAsync(city);
+            AppLogger.LogActionSuccess(_logger, "UpdateCity", new { id });
+
+            return Result<City>.NoContent(ApiMessages.CityUpdated);
         }
 
-        private async Task<bool> DeleteInternalAsync(int id)
+        // -----------------------------
+        // DELETE CITY
+        // -----------------------------
+        public async Task<Result<City>> DeleteCityAsync(int id)
         {
-            var found = await _repo.GetByIdAsync(id);
-            if (found == null) return false;
+            AppLogger.LogActionStart(_logger, "DeleteCity", new { id });
+
+            var city = await _repo.GetByIdAsync(id);
+            if (city == null)
+            {
+                AppLogger.LogWarning(_logger, ApiMessages.CityNotFound, new { id });
+                return Result<City>.NotFound(ApiMessages.CityNotFound);
+            }
+
             await _repo.DeleteAsync(id);
-            return true;
+            AppLogger.LogActionSuccess(_logger, "DeleteCity", new { id });
+
+            return Result<City>.NoContent(ApiMessages.CityDeleted);
         }
 
-        public async Task<IEnumerable<CitySearchResultDto>> SearchCityByNameAsync(string name)
+        // -----------------------------
+        // SEARCH CITY
+        // -----------------------------
+        public async Task<Result<IEnumerable<CitySearchResultDto>>> SearchCityByNameAsync(string name)
         {
-            var cities = (await _repo.SearchByNameAsync(name)).ToList();
+            AppLogger.LogActionStart(_logger, "SearchCity", new { name });
 
-            if (!cities.Any()) return Enumerable.Empty<CitySearchResultDto>();
+            var cities = (await _repo.SearchByNameAsync(name)).ToList();
+            if (!cities.Any())
+            {
+                AppLogger.LogWarning(_logger, ApiMessages.NoResults, new { name });
+                return Result<IEnumerable<CitySearchResultDto>>.NotFound(ApiMessages.NoResults);
+            }
 
             var results = new List<CitySearchResultDto>();
 
@@ -77,6 +113,7 @@ namespace CityInfoApi.Services
                     EstimatedPopulation = c.EstimatedPopulation
                 };
 
+                // Country info
                 try
                 {
                     var countryInfo = await GetCountryInfoAsync(c.Country);
@@ -87,11 +124,12 @@ namespace CityInfoApi.Services
                         dto.CurrencyCode = countryInfo.CurrencyCode;
                     }
                 }
-                catch(Exception ex)
+                catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Error retrieving country info for {Country}", c.Country);
+                    AppLogger.LogError(_logger, $"Error retrieving country info for {c.Country}", ex);
                 }
 
+                // Weather info
                 try
                 {
                     var weather = await GetWeatherAsync(c.Name);
@@ -104,16 +142,19 @@ namespace CityInfoApi.Services
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Error retrieving weather info for {City}", c.Name);
+                    AppLogger.LogError(_logger, $"Error retrieving weather info for {c.Name}", ex);
                 }
 
                 results.Add(dto);
             }
 
-            return results;
+            AppLogger.LogActionSuccess(_logger, "SearchCity", new { Count = results.Count });
+            return Result<IEnumerable<CitySearchResultDto>>.Ok(results);
         }
 
-
+        // -----------------------------
+        // PRIVATE HELPERS
+        // -----------------------------
         private record CountryInfo(string? Alpha2, string? Alpha3, string? CurrencyCode);
 
         private async Task<CountryInfo?> GetCountryInfoAsync(string countryName)
@@ -121,7 +162,6 @@ namespace CityInfoApi.Services
             if (string.IsNullOrWhiteSpace(countryName)) return null;
 
             var client = _httpFactory.CreateClient("RestCountries");
-
             var url = $"name/{WebUtility.UrlEncode(countryName)}?fullText=true";
 
             var resp = await client.GetAsync(url);
@@ -129,7 +169,7 @@ namespace CityInfoApi.Services
 
             var text = await resp.Content.ReadAsStringAsync();
             using var doc = JsonDocument.Parse(text);
-            JsonElement root = doc.RootElement;
+            var root = doc.RootElement;
 
             if (root.ValueKind == JsonValueKind.Array && root.GetArrayLength() > 0)
                 root = root[0];
@@ -173,9 +213,9 @@ namespace CityInfoApi.Services
             var apiKey = _config["VisualCrossingMap:ApiKey"];
             if (string.IsNullOrWhiteSpace(apiKey)) return null;
 
-            // Build q param: city or city,country
             var q = WebUtility.UrlEncode(cityName);
             var url = $"{q}/today?unitGroup=metric&include=days&key={apiKey}&contentType=json";
+
             var resp = await client.GetAsync(url);
             if (!resp.IsSuccessStatusCode) return null;
 
@@ -186,7 +226,9 @@ namespace CityInfoApi.Services
             string additionalWeatherDescription = string.Empty;
             double temp = 0;
 
-            if (root.TryGetProperty("days", out var weatherArr) && weatherArr.ValueKind == JsonValueKind.Array && weatherArr.GetArrayLength() > 0)
+            if (root.TryGetProperty("days", out var weatherArr) &&
+                weatherArr.ValueKind == JsonValueKind.Array &&
+                weatherArr.GetArrayLength() > 0)
             {
                 var weatherElement = weatherArr[0];
                 mainWeatherInfo = GetString(weatherElement, "conditions") ?? string.Empty;
@@ -197,7 +239,6 @@ namespace CityInfoApi.Services
                     temp = t;
                 }
             }
-
 
             return new WeatherInfo(mainWeatherInfo, additionalWeatherDescription, temp);
         }

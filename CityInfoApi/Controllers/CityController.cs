@@ -1,86 +1,98 @@
-﻿using CityInfoApi.DTOs;
+﻿using CityInfoApi.Common;
+using CityInfoApi.DTOs;
 using CityInfoApi.Models;
 using CityInfoApi.Services;
 using Microsoft.AspNetCore.Mvc;
 
 namespace CityInfoApi.Controllers
 {
-    [Route("api/[controller]")]
     [ApiController]
+    [Route("api/[controller]")]
     public class CityController : ControllerBase
     {
-        private readonly ICityService _svc;
+        private readonly ICityService _cityService;
         private readonly ILogger<CityController> _logger;
 
-        public CityController(ICityService svc, ILogger<CityController> logger)
+        public CityController(ICityService cityService, ILogger<CityController> logger)
         {
-            _svc = svc;
+            _cityService = cityService;
             _logger = logger;
         }
 
         [HttpPost]
-        public async Task<ActionResult> AddCity([FromBody] AddCityRequest request)
+        public async Task<IActionResult> AddCity([FromBody] AddCityRequest request)
         {
             if (request == null)
             {
-                _logger.LogWarning("AddCity called with null body");
-                return BadRequest();
+                AppLogger.LogWarning(_logger, ApiMessages.InvalidRequest);
+                return BadRequest(Result<City>.BadRequest(ApiMessages.InvalidRequest));
             }
 
-            var created = await _svc.AddCityAsync(request);
+            AppLogger.LogActionStart(_logger, ApiActions.AddCity, request);
+            var result = await _cityService.AddCityAsync(request);
 
-            if (created == null)
-            {
-                _logger.LogWarning("Attempted to add duplicate city {CityName} in {Country}", request.Name, request.Country);
-                return Conflict(new { message = $"City '{request.Name}' in '{request.Country}' already exists." });
-            }
-
-            _logger.LogInformation("Added city {CityName} with id {CityId}", created.Name, created.Id);
-            return Ok(created);
+            AppLogger.LogActionSuccess(_logger, ApiActions.AddCity, new { request.Name, result.StatusCode });
+            return StatusCode(result.StatusCode, result);
         }
 
-        [HttpPut("{id}")]
-        public async Task<IActionResult> UpdateCity(int id, [FromBody] UpdateCityRequest req)
+        [HttpPut("{id:int}")]
+        public async Task<IActionResult> UpdateCity(int id, [FromBody] UpdateCityRequest request)
         {
-            var ok = await _svc.UpdateCityAsync(id, req.TouristRating, req.DateEstablished, req.EstimatedPopulation);
-            if (!ok)
+            if (request == null)
             {
-                _logger.LogWarning("Update attempted on non-existent city {CityId}", id);
-                return NotFound();
+                AppLogger.LogWarning(_logger, ApiMessages.InvalidRequest, new { Id = id });
+                return BadRequest(Result<City>.BadRequest(ApiMessages.InvalidRequest));
             }
 
-            _logger.LogInformation("Updated city {CityId}", id);
+            AppLogger.LogActionStart(_logger, ApiActions.UpdateCity, new { Id = id });
+            var result = await _cityService.UpdateCityAsync(id, request.TouristRating, request.DateEstablished, request.EstimatedPopulation);
 
-            return NoContent();
+            if (!result.Success)
+            {
+                AppLogger.LogWarning(_logger, result.Message ?? ApiMessages.CityNotFound, new { Id = id });
+                return StatusCode(result.StatusCode, result);
+            }
+
+            AppLogger.LogActionSuccess(_logger, ApiActions.UpdateCity, new { Id = id });
+            return StatusCode(result.StatusCode, result);
         }
 
-        [HttpDelete("{id}")]
+        [HttpDelete("{id:int}")]
         public async Task<IActionResult> DeleteCity(int id)
         {
-            var ok = await _svc.DeleteCityAsync(id);
-            if (!ok)
+            AppLogger.LogActionStart(_logger, ApiActions.DeleteCity, new { Id = id });
+            var result = await _cityService.DeleteCityAsync(id);
+
+            if (!result.Success)
             {
-                _logger.LogWarning("Delete attempted on non-existent city {CityId}", id);
-                return NotFound();
+                AppLogger.LogWarning(_logger, result.Message ?? ApiMessages.CityNotFound, new { Id = id });
+                return StatusCode(result.StatusCode, result);
             }
 
-            _logger.LogInformation("Deleted city {CityId}", id);
-            return NoContent();
+            AppLogger.LogActionSuccess(_logger, ApiActions.DeleteCity, new { Id = id });
+            return StatusCode(result.StatusCode, result);
         }
 
         [HttpGet("search")]
-        public async Task<ActionResult<IEnumerable<CitySearchResultDto>>> Search([FromQuery] string name)
+        public async Task<IActionResult> Search([FromQuery] string name)
         {
-            _logger.LogInformation("Search requested for city name: {Name}", name);
-            var results = await _svc.SearchCityByNameAsync(name);
-
-            if (results == null || !results.Any())
+            if (string.IsNullOrWhiteSpace(name))
             {
-                _logger.LogInformation("No results found for {Name}", name);
-                return NotFound();
+                AppLogger.LogWarning(_logger, ApiMessages.SearchEmpty);
+                return BadRequest(Result<IEnumerable<CitySearchResultDto>>.BadRequest(ApiMessages.SearchEmpty));
             }
 
-            return Ok(results);
+            AppLogger.LogActionStart(_logger, ApiActions.SearchCity, new { Name = name });
+            var result = await _cityService.SearchCityByNameAsync(name);
+
+            if (!result.Success || result.Data == null || !result.Data.Any())
+            {
+                AppLogger.LogWarning(_logger, ApiMessages.NoResults, new { Name = name });
+                return NotFound(Result<IEnumerable<CitySearchResultDto>>.NotFound(ApiMessages.NoResults));
+            }
+
+            AppLogger.LogActionSuccess(_logger, ApiActions.SearchCity, new { Name = name, Count = result.Data.Count() });
+            return Ok(result);
         }
     }
 }

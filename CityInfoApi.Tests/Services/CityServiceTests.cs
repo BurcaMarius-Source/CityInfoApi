@@ -63,8 +63,8 @@ namespace CityInfoApi.Tests.Services
 
             var result = await svc.SearchCityByNameAsync("TestTown");
 
-            Assert.NotNull(result);
-            var first = Assert.Single(result);
+            Assert.NotNull(result.Data);
+            var first = Assert.Single(result.Data);
             Assert.Equal("TestTown", first.Name);
             Assert.Equal("TL", first.CountryAlpha2);
             Assert.Equal("TST", first.CountryAlpha3);
