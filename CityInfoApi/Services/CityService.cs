@@ -2,6 +2,7 @@
 using CityInfoApi.DTOs;
 using CityInfoApi.Models;
 using CityInfoApi.Repositories;
+using Microsoft.Extensions.Caching.Memory;
 using System.Net;
 using System.Text.Json;
 
@@ -11,13 +12,18 @@ namespace CityInfoApi.Services
         ICityRepository repo,
         IHttpClientFactory httpFactory,
         IConfiguration config,
-        ILogger<CityService> logger) : ICityService
+        ILogger<CityService> logger,
+        IMemoryCache cache) : ICityService
     {
         private readonly ICityRepository _repo = repo;
         private readonly IHttpClientFactory _httpFactory = httpFactory;
         private readonly IConfiguration _config = config;
         private readonly ILogger<CityService> _logger = logger;
-
+        private readonly IMemoryCache _cache = cache;
+        private static readonly JsonSerializerOptions JsonOptions = new()
+        {
+            PropertyNameCaseInsensitive = true
+        };
         // -----------------------------
         // ADD CITY
         // -----------------------------
@@ -92,6 +98,8 @@ namespace CityInfoApi.Services
             AppLogger.LogActionStart(_logger, ApiActions.SearchCity, new { name });
 
             var cities = (await _repo.SearchByNameAsync(name)).ToList();
+            var countryCache = new Dictionary<string, CountryInfo?>(StringComparer.OrdinalIgnoreCase);
+
             if (!cities.Any())
             {
                 AppLogger.LogWarning(_logger, ApiMessages.NoResults, new { name });
@@ -116,7 +124,12 @@ namespace CityInfoApi.Services
                 // Country info
                 try
                 {
-                    var countryInfo = await GetCountryInfoAsync(c.Country);
+                    if (!countryCache.TryGetValue(c.Country, out var countryInfo))
+                    {
+                        countryInfo = await GetCachedCountryInfoAsync(c.Country);
+                        countryCache[c.Country] = countryInfo;
+                    }
+
                     if (countryInfo != null)
                     {
                         dto.CountryAlpha2 = countryInfo.Alpha2;
@@ -155,46 +168,43 @@ namespace CityInfoApi.Services
         // -----------------------------
         // PRIVATE HELPERS
         // -----------------------------
-  
+       
         private async Task<CountryInfo?> GetCountryInfoAsync(string countryName)
         {
             if (string.IsNullOrWhiteSpace(countryName)) return null;
 
             var client = _httpFactory.CreateClient("RestCountries");
-            var url = $"name/{WebUtility.UrlEncode(countryName)}?fullText=true";
+            var url = $"name/{WebUtility.UrlEncode(countryName)}?fullText=true&fields=cca2,cca3,currencies";
 
             var resp = await client.GetAsync(url);
             if (!resp.IsSuccessStatusCode) return null;
 
-            var text = await resp.Content.ReadAsStringAsync();
-            using var doc = JsonDocument.Parse(text);
-            var root = doc.RootElement;
+            var json = await resp.Content.ReadAsStringAsync();
+            var countries = JsonSerializer.Deserialize<List<RestCountryResponse>>(json, JsonOptions);
 
-            if (root.ValueKind == JsonValueKind.Array && root.GetArrayLength() > 0)
-                root = root[0];
+            var country = countries?.FirstOrDefault();
+            if (country == null)
+                return null;
 
-            string? alpha2 = GetString(root, "alpha2Code") ?? GetString(root, "cca2");
-            string? alpha3 = GetString(root, "alpha3Code") ?? GetString(root, "cca3");
+            var currencyCode = country.Currencies?.Keys.FirstOrDefault();
 
-            string? currencyCode = null;
-            if (root.TryGetProperty("currencies", out var currenciesElem))
-            {
-                if (currenciesElem.ValueKind == JsonValueKind.Array && currenciesElem.GetArrayLength() > 0)
-                {
-                    var first = currenciesElem[0];
-                    currencyCode = GetString(first, "code") ?? GetString(first, "symbol") ?? first.ToString();
-                }
-                else if (currenciesElem.ValueKind == JsonValueKind.Object)
-                {
-                    foreach (var prop in currenciesElem.EnumerateObject())
-                    {
-                        currencyCode = prop.Name;
-                        break;
-                    }
-                }
-            }
+            return new CountryInfo(country.Cca2, country.Cca3, currencyCode);
 
-            return new CountryInfo(alpha2, alpha3, currencyCode);
+        }
+
+        private async Task<CountryInfo?> GetCachedCountryInfoAsync(string countryName)
+        {
+            if (string.IsNullOrWhiteSpace(countryName))
+                return null;
+
+            var cacheKey = $"country:{countryName.ToLowerInvariant()}";
+            if (_cache.TryGetValue(cacheKey, out CountryInfo? cached))
+                return cached;
+
+            var info = await GetCountryInfoAsync(countryName);
+
+            _cache.Set(cacheKey, info, TimeSpan.FromHours(6));
+            return info;
         }
 
         private static string? GetString(JsonElement el, string propName)
@@ -216,28 +226,20 @@ namespace CityInfoApi.Services
             var resp = await client.GetAsync(url);
             if (!resp.IsSuccessStatusCode) return null;
 
-            using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
-            var root = doc.RootElement;
+            var json = await resp.Content.ReadAsStringAsync();
 
-            string mainWeatherInfo = string.Empty;
-            string additionalWeatherDescription = string.Empty;
-            double temp = 0;
+            var weatherResponse = JsonSerializer.Deserialize<VisualCrossingResponse>(json, JsonOptions);
+            var firstDay = weatherResponse?.Days?.FirstOrDefault();
 
-            if (root.TryGetProperty("days", out var weatherArr) &&
-                weatherArr.ValueKind == JsonValueKind.Array &&
-                weatherArr.GetArrayLength() > 0)
-            {
-                var weatherElement = weatherArr[0];
-                mainWeatherInfo = GetString(weatherElement, "conditions") ?? string.Empty;
-                additionalWeatherDescription = GetString(weatherElement, "description") ?? string.Empty;
+            if (firstDay == null)
+                return null;
 
-                if (weatherElement.TryGetProperty("temp", out var tempElem) && tempElem.TryGetDouble(out var t))
-                {
-                    temp = t;
-                }
-            }
+            return new WeatherInfo(
+                firstDay.Conditions ?? string.Empty,
+                firstDay.Description ?? string.Empty,
+                firstDay.Temp
+            );
 
-            return new WeatherInfo(mainWeatherInfo, additionalWeatherDescription, temp);
         }
     }
 }

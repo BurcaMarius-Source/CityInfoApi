@@ -16,8 +16,11 @@ namespace CityInfoApi
             var builder = WebApplication.CreateBuilder(args);
 
 
+            //builder.Services.AddDbContext<AppDbContext>(options =>
+            //    options.UseInMemoryDatabase("CitiesDb"));
+
             builder.Services.AddDbContext<AppDbContext>(options =>
-                options.UseInMemoryDatabase("CitiesDb"));
+                options.UseSqlServer(builder.Configuration.GetConnectionString("CitiesDb")));
 
             builder.Services.AddScoped<ICityRepository, CityRepository>();
             builder.Services.AddScoped<ICityService, CityService>();
@@ -42,6 +45,7 @@ namespace CityInfoApi
             builder.Services.AddValidatorsFromAssemblyContaining<UpdateCityRequestValidator>();
             builder.Services.AddEndpointsApiExplorer();
             builder.Services.AddSwaggerGen();
+            builder.Services.AddMemoryCache();
 
             var app = builder.Build();
             if (app.Environment.IsDevelopment())

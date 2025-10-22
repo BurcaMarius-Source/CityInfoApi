@@ -7,6 +7,7 @@ using System.Net;
 using CityInfoApi.Data;
 using Microsoft.EntityFrameworkCore;
 using System.Text;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace CityInfoApi.Tests.Services
 {
@@ -19,6 +20,7 @@ namespace CityInfoApi.Tests.Services
             var options = new DbContextOptionsBuilder<AppDbContext>()
                 .UseInMemoryDatabase(databaseName: "TestDb_Search")
                 .Options;
+            var memoryCache = new MemoryCache(new MemoryCacheOptions());
 
             using var db = new AppDbContext(options);
             db.Cities.Add(new City
@@ -36,10 +38,15 @@ namespace CityInfoApi.Tests.Services
 
             // prepare fake HTTP responses:
             var restCountriesJson = @"[{
-                ""alpha2Code"": ""TL"",
-                ""alpha3Code"": ""TST"",
-                ""currencies"": [{ ""code"": ""TST"" }]
-            }]";
+        ""cca2"": ""TL"",
+        ""cca3"": ""TST"",
+        ""currencies"": {
+            ""TST"": {
+                ""name"": ""Test Currency"",
+                ""symbol"": ""$""
+            }
+        }
+    }]";
 
             var weatherJson = @"{
                 ""days"": [{ ""conditions"": ""Clear"", ""description"": ""clear sky"", ""temp"": 20.5 }]
@@ -59,7 +66,7 @@ namespace CityInfoApi.Tests.Services
 
             var logger = LoggerFactory.Create(builder => builder.AddConsole()).CreateLogger<CityService>();
 
-            var svc = new CityService(repo, factory, inMemoryConfig, logger);
+            var svc = new CityService(repo, factory, inMemoryConfig, logger, memoryCache);
 
             var result = await svc.SearchCityByNameAsync("TestTown");
 
